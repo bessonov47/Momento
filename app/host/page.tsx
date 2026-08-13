@@ -35,17 +35,25 @@ export default function HostPage() {
   }
 
   useEffect(() => {
-    const code = prompt("Введите код игры:");
+    let code = localStorage.getItem("momento_event_code");
+
+    if (!code) {
+      code = prompt("Введите код игры:");
+
+      if (code) {
+        code = code.trim().toUpperCase();
+        localStorage.setItem("momento_event_code", code);
+      }
+    }
 
     if (!code) {
       setLoading(false);
       return;
     }
 
-    const normalizedCode = code.trim().toUpperCase();
-    setEventCode(normalizedCode);
+    setEventCode(code);
 
-    loadPlayers(normalizedCode).finally(() => {
+    loadPlayers(code).finally(() => {
       setLoading(false);
     });
   }, []);
@@ -53,7 +61,7 @@ export default function HostPage() {
   useEffect(() => {
     if (!eventCode) return;
 
-    let channel: ReturnType<typeof supabase.channel>;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
 
     async function setupRealtime() {
       const { data: event } = await supabase
@@ -65,7 +73,7 @@ export default function HostPage() {
       if (!event) return;
 
       channel = supabase
-        .channel(`players-${event.id}`)
+        .channel(`momento-players-${event.id}`)
         .on(
           "postgres_changes",
           {
@@ -93,7 +101,7 @@ export default function HostPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
-        Загрузка...
+        Загрузка MOMENTO...
       </main>
     );
   }
