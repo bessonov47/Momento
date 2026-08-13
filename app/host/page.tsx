@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { createClient } from "../utils/supabase/client";
 
 type Player = {
@@ -15,6 +16,7 @@ export default function HostPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [eventCode, setEventCode] = useState("");
   const [loading, setLoading] = useState(true);
+  const [siteUrl, setSiteUrl] = useState("");
 
   async function loadPlayers(code: string) {
     const { data: event } = await supabase
@@ -35,6 +37,8 @@ export default function HostPage() {
   }
 
   useEffect(() => {
+    setSiteUrl(window.location.origin);
+
     let code = localStorage.getItem("momento_event_code");
 
     if (!code) {
@@ -106,70 +110,121 @@ export default function HostPage() {
     );
   }
 
+  const joinUrl =
+    siteUrl && eventCode
+      ? `${siteUrl}/join?code=${encodeURIComponent(eventCode)}`
+      : "";
+
   return (
     <main className="min-h-screen bg-[#101014] text-white px-6 py-10">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
 
+        {/* HEADER */}
         <div className="text-center mb-10">
           <p className="text-xs tracking-[0.35em] text-[#C8FF3D]">
             MOMENTO LIVE
           </p>
 
-          <h1 className="text-6xl font-black mt-4">
+          <h1 className="text-6xl md:text-7xl font-black mt-4">
             {eventCode || "LOBBY"}
           </h1>
 
           <p className="text-zinc-500 mt-3">
-            Ожидаем гостей...
+            Подключайтесь к игре
           </p>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
+        {/* QR + PLAYERS */}
+        <div className="grid md:grid-cols-[300px_1fr] gap-6">
 
-          <div className="flex items-end justify-between mb-8">
-            <div>
-              <p className="text-zinc-500 text-sm">
-                ПОДКЛЮЧИЛИСЬ
+          {/* QR */}
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8 flex flex-col items-center justify-center">
+
+            <p className="text-zinc-500 text-xs tracking-[0.2em] mb-5">
+              СКАНИРУЙТЕ QR-КОД
+            </p>
+
+            {joinUrl && (
+              <div className="bg-white p-4 rounded-2xl">
+                <QRCodeSVG
+                  value={joinUrl}
+                  size={210}
+                  level="H"
+                />
+              </div>
+            )}
+
+            <p className="text-zinc-400 text-sm text-center mt-6">
+              Наведите камеру телефона
+              <br />
+              чтобы подключиться
+            </p>
+
+            <div className="mt-6 text-center">
+              <p className="text-zinc-600 text-xs">
+                ИЛИ ВВЕДИТЕ КОД
               </p>
 
-              <p className="text-5xl font-black mt-2">
-                {players.length}
+              <p className="text-2xl font-black tracking-widest mt-2 text-[#C8FF3D]">
+                {eventCode}
               </p>
             </div>
 
-            <div className="text-[#C8FF3D] text-sm">
-              ● LIVE
-            </div>
           </div>
 
-          {players.length === 0 ? (
-            <div className="py-20 text-center text-zinc-600">
-              Пока никто не подключился
+          {/* PLAYERS */}
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
+
+            <div className="flex items-end justify-between mb-8">
+
+              <div>
+                <p className="text-zinc-500 text-sm">
+                  ПОДКЛЮЧИЛИСЬ
+                </p>
+
+                <p className="text-5xl font-black mt-2">
+                  {players.length}
+                </p>
+              </div>
+
+              <div className="text-[#C8FF3D] text-sm">
+                ● LIVE
+              </div>
+
             </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {players.map((player, index) => (
-                <div
-                  key={player.id}
-                  className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
-                >
-                  <div className="text-[#C8FF3D] text-sm">
-                    #{index + 1}
-                  </div>
 
-                  <div className="font-bold text-xl mt-2">
-                    {player.name}
-                  </div>
+            {players.length === 0 ? (
+              <div className="py-20 text-center text-zinc-600">
+                Пока никто не подключился
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
 
-                  {player.table_number && (
-                    <div className="text-zinc-500 text-sm mt-1">
-                      Стол {player.table_number}
+                {players.map((player, index) => (
+                  <div
+                    key={player.id}
+                    className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
+                  >
+                    <div className="text-[#C8FF3D] text-sm">
+                      #{index + 1}
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+
+                    <div className="font-bold text-xl mt-2">
+                      {player.name}
+                    </div>
+
+                    {player.table_number && (
+                      <div className="text-zinc-500 text-sm mt-1">
+                        Стол {player.table_number}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+              </div>
+            )}
+
+          </div>
 
         </div>
 

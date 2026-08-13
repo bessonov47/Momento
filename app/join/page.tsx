@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "../utils/supabase/client";
 
 export default function JoinPage() {
@@ -11,7 +11,14 @@ export default function JoinPage() {
   const [loading, setLoading] = useState(false);
   const [joined, setJoined] = useState(false);
   const [error, setError] = useState("");
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const urlCode = params.get("code");
 
+  if (urlCode) {
+    setCode(urlCode.trim().toUpperCase());
+  }
+}, []);
   async function joinGame() {
     if (!name.trim()) {
       setError("Введите ваше имя");

@@ -141,7 +141,7 @@ export default function Home() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Например: Свадьба Алексея и Марии"
+            placeholder="Например: Выпускной"
             className="w-full rounded-2xl border border-white/10 bg-white/5 px-6 py-5 text-lg outline-none placeholder:text-white/30 focus:border-[#C8FF3D]"
           />
 
