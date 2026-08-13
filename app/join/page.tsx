@@ -1,150 +1,140 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { createClient } from "../utils/supabase/client";
 
 export default function JoinPage() {
   const supabase = createClient();
-  const searchParams = useSearchParams();
 
-  const [code, setCode] = useState("");
   const [name, setName] = useState("");
-  const [eventName, setEventName] = useState("");
-  const [joined, setJoined] = useState(false);
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [joined, setJoined] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const qrCode = searchParams.get("code");
-
-    if (qrCode) {
-      setCode(qrCode.toUpperCase());
-    }
-  }, [searchParams]);
-
   async function joinGame() {
-    if (!code.trim()) {
-      setError("Введите код игры");
+    if (!name.trim()) {
+      setError("Введите ваше имя");
       return;
     }
 
-    if (!name.trim()) {
-      setError("Введите своё имя");
+    if (!code.trim()) {
+      setError("Введите код игры");
       return;
     }
 
     setLoading(true);
     setError("");
 
-    const { data: event, error: eventError } = await supabase
-      .from("events")
-      .select("id, name")
-      .eq("code", code.trim().toUpperCase())
-      .single();
+    try {
+      // Ищем игру по коду
+      const { data: event, error: eventError } = await supabase
+        .from("events")
+        .select("id, name, code, status")
+        .eq("code", code.trim().toUpperCase())
+        .single();
 
-    if (eventError || !event) {
-      setError("Игра с таким кодом не найдена");
-      setLoading(false);
-      return;
+      if (eventError || !event) {
+        setError("Игра с таким кодом не найдена");
+        setLoading(false);
+        return;
+      }
+
+      // Добавляем игрока
+      const { error: playerError } = await supabase
+        .from("players")
+        .insert({
+          event_id: event.id,
+          name: name.trim(),
+        });
+
+      if (playerError) {
+        setError(playerError.message);
+        setLoading(false);
+        return;
+      }
+
+      setJoined(true);
+    } catch {
+      setError("Не удалось подключиться. Попробуйте ещё раз.");
     }
 
-    const { error: playerError } = await supabase
-      .from("players")
-      .insert({
-        event_id: event.id,
-        name: name.trim(),
-      });
-
-    if (playerError) {
-      setError(playerError.message);
-      setLoading(false);
-      return;
-    }
-
-    setEventName(event.name);
-    setJoined(true);
     setLoading(false);
   }
 
   if (joined) {
     return (
       <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center px-6">
-
         <div className="w-full max-w-md text-center">
-
-          <div className="text-sm tracking-[0.35em] text-[#C8FF3D]">
+          <div className="text-xs tracking-[0.35em] text-[#C8FF3D] mb-6">
             MOMENTO
           </div>
 
-          <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-10">
+          <h1 className="text-4xl font-black mb-4">
+            ВЫ ПОДКЛЮЧЕНЫ
+          </h1>
 
-            <div className="text-6xl">
-              🎉
-            </div>
+          <p className="text-zinc-400 text-lg">
+            {name}, ждите начала игры.
+          </p>
 
-            <h1 className="mt-6 text-4xl font-black">
-              ТЫ В ИГРЕ!
-            </h1>
-
-            <p className="mt-4 text-white/40">
-              {eventName}
+          <div className="mt-10 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+            <p className="text-sm text-zinc-500">
+              Игра
             </p>
 
-            <div className="mt-8 rounded-2xl bg-[#C8FF3D] px-6 py-5 text-xl font-black text-[#101014]">
-              {name}
-            </div>
-
-            <p className="mt-6 text-sm text-white/40">
-              Следи за экраном — скоро начнём!
+            <p className="text-2xl font-bold mt-2">
+              MOMENTO
             </p>
 
+            <p className="text-zinc-500 mt-4">
+              Следите за экраном 📺
+            </p>
           </div>
-
         </div>
-
       </main>
     );
   }
 
   return (
     <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center px-6">
-
       <div className="w-full max-w-md text-center">
 
-        <div className="text-sm tracking-[0.35em] text-[#C8FF3D]">
+        <div className="text-xs tracking-[0.35em] text-[#C8FF3D] mb-6">
           INTERACTIVE EVENT EXPERIENCE
         </div>
 
-        <h1 className="mt-4 text-6xl font-black tracking-[-0.06em]">
+        <h1 className="text-6xl font-black tracking-tight mb-4">
           MOMENTO
         </h1>
 
-        <p className="mt-5 text-white/50">
-          Подключись к игре
+        <p className="text-zinc-400 mb-10">
+          Присоединитесь к игре
         </p>
 
-        <div className="mt-10 space-y-4">
+        <div className="space-y-4">
 
           <input
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="КОД ИГРЫ"
-            maxLength={6}
-            className="w-full rounded-2xl border border-white/10 bg-white/5 px-6 py-5 text-center text-2xl font-black uppercase tracking-[0.3em] outline-none placeholder:text-white/20 focus:border-[#C8FF3D]"
+            type="text"
+            placeholder="Ваше имя"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-4 outline-none text-white placeholder:text-zinc-600 focus:border-[#C8FF3D]"
           />
 
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="ТВОЁ ИМЯ"
-            className="w-full rounded-2xl border border-white/10 bg-white/5 px-6 py-5 text-center outline-none placeholder:text-white/30 focus:border-[#C8FF3D]"
+            type="text"
+            placeholder="Код игры"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            maxLength={6}
+            className="w-full rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-4 text-center text-2xl font-bold tracking-[0.3em] outline-none text-white placeholder:text-zinc-600 focus:border-[#C8FF3D]"
           />
 
           <button
             onClick={joinGame}
             disabled={loading}
-            className="w-full rounded-2xl bg-[#C8FF3D] px-6 py-5 font-black text-[#101014] transition hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+            className="w-full rounded-2xl bg-[#C8FF3D] px-6 py-4 font-black text-[#101014] transition hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
           >
             {loading ? "ПОДКЛЮЧЕНИЕ..." : "ВОЙТИ В ИГРУ"}
           </button>
@@ -157,8 +147,11 @@ export default function JoinPage() {
           </p>
         )}
 
-      </div>
+        <p className="mt-16 text-xs tracking-[0.3em] text-zinc-700">
+          YOUR EVENT. YOUR MOMENTS.
+        </p>
 
+      </div>
     </main>
   );
 }
