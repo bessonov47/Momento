@@ -11,38 +11,114 @@ type Player = {
   table_number: string | null;
 };
 
+type Question = {
+  id: string;
+  game_id: string;
+  question: string;
+  media_url: string | null;
+  media_type: string | null;
+};
+
+type Answer = {
+  id: string;
+  question_id: string;
+  text: string;
+  is_correct: boolean;
+};
+
 type Game = {
   id: string;
+  event_id: string;
   name: string;
   type: string;
   status: string;
+  current_question_id: string | null;
 };
 
-function HostPageContent() {
+function HostContent() {
   const supabase = createClient();
   const searchParams = useSearchParams();
 
-  const [players, setPlayers] = useState<Player[]>([]);
   const [eventCode, setEventCode] = useState("");
   const [eventId, setEventId] = useState("");
   const [eventName, setEventName] = useState("");
 
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [answers, setAnswers] = useState<Answer[]>([]);
   const [game, setGame] = useState<Game | null>(null);
 
   const [loading, setLoading] = useState(true);
+  const [creatingQuestion, setCreatingQuestion] = useState(false);
   const [startingGame, setStartingGame] = useState(false);
-  const [siteUrl, setSiteUrl] = useState("");
 
-  // ---------------------------------------
+  const [questionText, setQuestionText] = useState("");
+
+  const [answerTexts, setAnswerTexts] = useState([
+    "",
+    "",
+    "",
+    "",
+  ]);
+
+  const [correctAnswer, setCorrectAnswer] = useState(0);
+
+  const [error, setError] = useState("");
+
+  // ==================================================
+  // EVENT CODE FROM URL
+  // ==================================================
+
+  useEffect(() => {
+    const code = searchParams.get("event");
+
+    if (!code) {
+      setError("Код мероприятия не найден");
+      setLoading(false);
+      return;
+    }
+
+    setEventCode(code.trim().toUpperCase());
+  }, [searchParams]);
+
+  // ==================================================
+  // LOAD EVENT
+  // ==================================================
+
+  async function loadEvent(code: string) {
+    const { data, error } = await supabase
+      .from("events")
+      .select("id, name, code")
+      .eq("code", code)
+      .single();
+
+    if (error || !data) {
+      console.error("Ошибка загрузки мероприятия:", error);
+
+      setError("Мероприятие не найдено");
+      setLoading(false);
+
+      return null;
+    }
+
+    setEventId(data.id);
+    setEventName(data.name);
+
+    return data;
+  }
+
+  // ==================================================
   // LOAD PLAYERS
-  // ---------------------------------------
+  // ==================================================
 
   async function loadPlayers(id: string) {
     const { data, error } = await supabase
       .from("players")
       .select("id, name, table_number")
       .eq("event_id", id)
-      .order("created_at", { ascending: true });
+      .order("created_at", {
+        ascending: true,
+      });
 
     if (error) {
       console.error("Ошибка загрузки игроков:", error);
@@ -52,16 +128,20 @@ function HostPageContent() {
     setPlayers(data || []);
   }
 
-  // ---------------------------------------
-  // LOAD CURRENT GAME
-  // ---------------------------------------
+  // ==================================================
+  // LOAD GAME
+  // ==================================================
 
   async function loadGame(id: string) {
     const { data, error } = await supabase
       .from("games")
-      .select("id, name, type, status")
+      .select(
+        "id, event_id, name, type, status, current_question_id"
+      )
       .eq("event_id", id)
-      .order("created_at", { ascending: false })
+      .order("created_at", {
+        ascending: false,
+      })
       .limit(1)
       .maybeSingle();
 
@@ -73,57 +153,95 @@ function HostPageContent() {
     setGame(data || null);
   }
 
-  // ---------------------------------------
-  // LOAD EVENT
-  // ---------------------------------------
+  // ==================================================
+  // LOAD QUESTIONS
+  // ==================================================
 
-  useEffect(() => {
-    setSiteUrl(window.location.origin);
+  async function loadQuestions(id: string) {
+    const { data, error } = await supabase
+      .from("questions")
+      .select(
+        "id, game_id, question, media_url, media_type"
+      )
+      .order("created_at", {
+        ascending: true,
+      });
 
-    const codeFromUrl = searchParams.get("event");
-
-    if (!codeFromUrl) {
-      setLoading(false);
+    if (error) {
+      console.error("Ошибка загрузки вопросов:", error);
       return;
     }
 
-    const code = codeFromUrl.trim().toUpperCase();
+    setQuestions(data || []);
+
+    if (!data || data.length === 0) {
+      setAnswers([]);
+      return;
+    }
+
+    const questionIds = data.map(
+      (question) => question.id
+    );
+
+    const { data: answerData, error: answerError } =
+      await supabase
+        .from("answers")
+        .select(
+          "id, question_id, text, is_correct"
+        )
+        .in("question_id", questionIds)
+        .order("created_at", {
+          ascending: true,
+        });
+
+    if (answerError) {
+      console.error(
+        "Ошибка загрузки ответов:",
+        answerError
+      );
+
+      return;
+    }
+
+    setAnswers(answerData || []);
+  }
+
+  // ==================================================
+  // INITIAL LOAD
+  // ==================================================
+
+  useEffect(() => {
+    if (!eventCode) return;
 
     async function init() {
-      const { data: event, error } = await supabase
-        .from("events")
-        .select("id, code, name")
-        .eq("code", code)
-        .single();
+      setLoading(true);
+      setError("");
 
-      if (error || !event) {
-        console.error("Мероприятие не найдено:", error);
-        setLoading(false);
-        return;
-      }
+      const event = await loadEvent(eventCode);
 
-      setEventId(event.id);
-      setEventCode(event.code);
-      setEventName(event.name);
+      if (!event) return;
 
-      await loadPlayers(event.id);
-      await loadGame(event.id);
+      await Promise.all([
+        loadPlayers(event.id),
+        loadGame(event.id),
+        loadQuestions(event.id),
+      ]);
 
       setLoading(false);
     }
 
     init();
-  }, [searchParams]);
+  }, [eventCode]);
 
-  // ---------------------------------------
-  // REALTIME PLAYERS
-  // ---------------------------------------
+  // ==================================================
+  // REALTIME
+  // ==================================================
 
   useEffect(() => {
     if (!eventId) return;
 
-    const channel = supabase
-      .channel(`momento-host-players-${eventId}`)
+    const playersChannel = supabase
+      .channel(`host-players-${eventId}`)
       .on(
         "postgres_changes",
         {
@@ -138,20 +256,8 @@ function HostPageContent() {
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [eventId]);
-
-  // ---------------------------------------
-  // REALTIME GAMES
-  // ---------------------------------------
-
-  useEffect(() => {
-    if (!eventId) return;
-
-    const channel = supabase
-      .channel(`momento-host-games-${eventId}`)
+    const gamesChannel = supabase
+      .channel(`host-games-${eventId}`)
       .on(
         "postgres_changes",
         {
@@ -166,165 +272,356 @@ function HostPageContent() {
       )
       .subscribe();
 
+    const questionsChannel = supabase
+      .channel(`host-questions-${eventId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "questions",
+        },
+        () => {
+          loadQuestions(eventId);
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(playersChannel);
+      supabase.removeChannel(gamesChannel);
+      supabase.removeChannel(questionsChannel);
     };
   }, [eventId]);
 
-  // ---------------------------------------
-  // OPEN PUBLIC SCREEN
-  // ---------------------------------------
+  // ==================================================
+  // CREATE QUESTION
+  // ==================================================
 
-  function openPublicScreen() {
-    if (!eventCode) return;
-
-    const url = `${siteUrl}/?event=${encodeURIComponent(eventCode)}`;
-
-    window.open(url, "_blank");
-  }
-
-  // ---------------------------------------
-  // START QUIZ
-  // ---------------------------------------
-
-  async function startQuiz() {
+  async function createQuestion() {
     if (!eventId) return;
 
-    setStartingGame(true);
+    if (!questionText.trim()) {
+      setError("Введите текст вопроса");
+      return;
+    }
+
+    if (
+      answerTexts.some(
+        (answer) => !answer.trim()
+      )
+    ) {
+      setError(
+        "Заполните все 4 варианта ответа"
+      );
+      return;
+    }
+
+    setCreatingQuestion(true);
+    setError("");
 
     try {
-      // Проверяем, нет ли уже активной игры
-      const { data: activeGame, error: activeError } = await supabase
-        .from("games")
-        .select("id, name, type, status")
-        .eq("event_id", eventId)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      let gameId = game?.id;
 
-      if (activeError) {
-        console.error("Ошибка проверки активной игры:", activeError);
+      // ----------------------------------------------
+      // CREATE GAME IF IT DOES NOT EXIST
+      // ----------------------------------------------
+
+      if (!gameId) {
+        const { data: newGame, error: gameError } =
+          await supabase
+            .from("games")
+            .insert({
+              event_id: eventId,
+              name: "Викторина",
+              type: "quiz",
+              status: "waiting",
+              current_question_id: null,
+            })
+            .select()
+            .single();
+
+        if (gameError || !newGame) {
+          throw new Error(
+            gameError?.message ||
+              "Не удалось создать игру"
+          );
+        }
+
+        gameId = newGame.id;
+        setGame(newGame);
       }
 
-      if (activeGame) {
-        setGame(activeGame);
-        return;
-      }
+      // ----------------------------------------------
+      // CREATE QUESTION
+      // ----------------------------------------------
 
-      // Создаём новую игру
-      const { data: newGame, error } = await supabase
-        .from("games")
+      const {
+        data: newQuestion,
+        error: questionError,
+      } = await supabase
+        .from("questions")
         .insert({
-          event_id: eventId,
-          name: "Викторина",
-          type: "quiz",
-          status: "active",
+          game_id: gameId,
+          question: questionText.trim(),
+          media_url: null,
+          media_type: null,
         })
-        .select("id, name, type, status")
+        .select()
         .single();
 
-      if (error) {
-        console.error("Ошибка создания игры:", error);
-        alert("Не удалось создать игру");
-        return;
+      if (questionError || !newQuestion) {
+        throw new Error(
+          questionError?.message ||
+            "Не удалось создать вопрос"
+        );
       }
 
-      setGame(newGame);
+      // ----------------------------------------------
+      // CREATE ANSWERS
+      // ----------------------------------------------
+
+      const answerRows = answerTexts.map(
+        (text, index) => ({
+          question_id: newQuestion.id,
+          text: text.trim(),
+          is_correct: index === correctAnswer,
+        })
+      );
+
+      const { error: answersError } =
+        await supabase
+          .from("answers")
+          .insert(answerRows);
+
+      if (answersError) {
+        throw new Error(
+          answersError.message
+        );
+      }
+
+      // ----------------------------------------------
+      // RESET FORM
+      // ----------------------------------------------
+
+      setQuestionText("");
+
+      setAnswerTexts([
+        "",
+        "",
+        "",
+        "",
+      ]);
+
+      setCorrectAnswer(0);
+
+      await loadGame(eventId);
+      await loadQuestions(eventId);
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Ошибка создания вопроса"
+      );
+    } finally {
+      setCreatingQuestion(false);
+    }
+  }
+
+  // ==================================================
+  // START GAME
+  // ==================================================
+
+  async function startGame() {
+    if (!eventId) return;
+
+    if (questions.length === 0) {
+      setError(
+        "Сначала создайте хотя бы один вопрос"
+      );
+      return;
+    }
+
+    setStartingGame(true);
+    setError("");
+
+    try {
+      const firstQuestion = questions[0];
+
+      // ----------------------------------------------
+      // CREATE GAME
+      // ----------------------------------------------
+
+      if (!game) {
+        const {
+          data: newGame,
+          error: gameError,
+        } = await supabase
+          .from("games")
+          .insert({
+            event_id: eventId,
+            name: "Викторина",
+            type: "quiz",
+            status: "active",
+            current_question_id:
+              firstQuestion.id,
+          })
+          .select()
+          .single();
+
+        if (gameError || !newGame) {
+          throw new Error(
+            gameError?.message ||
+              "Не удалось запустить игру"
+          );
+        }
+
+        setGame(newGame);
+      }
+
+      // ----------------------------------------------
+      // UPDATE EXISTING GAME
+      // ----------------------------------------------
+
+      else {
+        const {
+          data: updatedGame,
+          error: updateError,
+        } = await supabase
+          .from("games")
+          .update({
+            status: "active",
+            current_question_id:
+              firstQuestion.id,
+          })
+          .eq("id", game.id)
+          .select()
+          .single();
+
+        if (updateError || !updatedGame) {
+          throw new Error(
+            updateError?.message ||
+              "Не удалось запустить игру"
+          );
+        }
+
+        setGame(updatedGame);
+      }
+
+      await loadGame(eventId);
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Ошибка запуска игры"
+      );
     } finally {
       setStartingGame(false);
     }
   }
 
-  // ---------------------------------------
-  // STOP GAME
-  // ---------------------------------------
+  // ==================================================
+  // OPEN PUBLIC SCREEN
+  // ==================================================
 
-  async function stopGame() {
-    if (!game) return;
+  function openScreen() {
+    if (!eventCode) return;
 
-    const { data, error } = await supabase
-      .from("games")
-      .update({
-        status: "finished",
-      })
-      .eq("id", game.id)
-      .select("id, name, type, status")
-      .single();
+    const screenUrl =
+      `${window.location.origin}/?event=${encodeURIComponent(
+        eventCode
+      )}`;
 
-    if (error) {
-      console.error("Ошибка завершения игры:", error);
-      return;
-    }
-
-    setGame(data);
+    window.open(screenUrl, "_blank");
   }
 
-  // ---------------------------------------
+  // ==================================================
+  // QUESTION ANSWERS
+  // ==================================================
+
+  function getQuestionAnswers(
+    questionId: string
+  ) {
+    return answers.filter(
+      (answer) =>
+        answer.question_id === questionId
+    );
+  }
+
+  // ==================================================
   // LOADING
-  // ---------------------------------------
+  // ==================================================
 
   if (loading) {
     return (
       <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
+
         <div className="text-center">
+
           <p className="text-xs tracking-[0.35em] text-[#C8FF3D]">
             MOMENTO HOST
           </p>
 
-          <p className="text-zinc-500 mt-4">
+          <p className="mt-5 text-zinc-500">
             Загрузка...
           </p>
+
         </div>
+
       </main>
     );
   }
 
-  // ---------------------------------------
-  // EVENT NOT FOUND
-  // ---------------------------------------
+  // ==================================================
+  // ERROR / EVENT NOT FOUND
+  // ==================================================
 
-  if (!eventCode) {
+  if (!eventId) {
     return (
       <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center px-6">
+
         <div className="text-center">
 
-          <p className="text-red-400 text-xl font-bold">
-            Мероприятие не найдено
-          </p>
-
-          <p className="text-zinc-600 mt-3">
-            Создайте мероприятие через главную страницу MOMENTO.
+          <p className="text-red-400">
+            {error ||
+              "Мероприятие не найдено"}
           </p>
 
         </div>
+
       </main>
     );
   }
 
-  // ---------------------------------------
+  // ==================================================
   // JOIN URL
-  // ---------------------------------------
+  // ==================================================
 
   const joinUrl =
-    siteUrl && eventCode
-      ? `${siteUrl}/join?code=${encodeURIComponent(eventCode)}`
+    typeof window !== "undefined"
+      ? `${window.location.origin}/join?code=${encodeURIComponent(
+          eventCode
+        )}`
       : "";
 
-  // ---------------------------------------
-  // HOST PAGE
-  // ---------------------------------------
+  // ==================================================
+  // MAIN HOST PAGE
+  // ==================================================
 
   return (
     <main className="min-h-screen bg-[#101014] text-white px-6 py-8">
 
       <div className="max-w-7xl mx-auto">
 
-        {/* --------------------------------- */}
-        {/* HEADER */}
-        {/* --------------------------------- */}
+        {/* ============================================
+            HEADER
+        ============================================ */}
 
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-10">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
 
           <div>
 
@@ -332,17 +629,15 @@ function HostPageContent() {
               MOMENTO HOST
             </p>
 
-            <h1 className="text-5xl md:text-6xl font-black mt-3">
+            <h1 className="text-5xl md:text-6xl font-black mt-4 tracking-[-0.04em]">
               {eventName}
             </h1>
 
-            <div className="flex items-center gap-4 mt-4">
+            <div className="mt-3 text-sm text-zinc-500">
 
-              <span className="text-zinc-500 text-sm">
-                Код мероприятия
-              </span>
+              Код мероприятия{" "}
 
-              <span className="text-[#C8FF3D] font-black tracking-[0.2em]">
+              <span className="text-[#C8FF3D] font-bold tracking-widest">
                 {eventCode}
               </span>
 
@@ -350,28 +645,26 @@ function HostPageContent() {
 
           </div>
 
-          {/* PUBLIC SCREEN BUTTON */}
-
           <button
-            onClick={openPublicScreen}
-            className="px-7 py-4 rounded-2xl bg-[#C8FF3D] text-[#101014] font-black hover:scale-[1.02] active:scale-[0.98] transition"
+            onClick={openScreen}
+            className="rounded-2xl bg-[#C8FF3D] px-7 py-4 font-black text-[#101014] hover:scale-[1.02] transition"
           >
             ОТКРЫТЬ ЭКРАН
           </button>
 
         </div>
 
-        {/* --------------------------------- */}
-        {/* TOP STATS */}
-        {/* --------------------------------- */}
+        {/* ============================================
+            STATS
+        ============================================ */}
 
-        <div className="grid md:grid-cols-3 gap-5 mb-6">
+        <div className="grid md:grid-cols-3 gap-4 mt-8">
 
           {/* PLAYERS */}
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
 
-            <p className="text-zinc-500 text-xs tracking-[0.2em]">
+            <p className="text-xs tracking-[0.2em] text-zinc-500">
               УЧАСТНИКИ
             </p>
 
@@ -379,7 +672,7 @@ function HostPageContent() {
               {players.length}
             </p>
 
-            <p className="text-zinc-600 text-sm mt-2">
+            <p className="text-sm text-zinc-600 mt-2">
               подключено сейчас
             </p>
 
@@ -387,103 +680,100 @@ function HostPageContent() {
 
           {/* GAME */}
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
 
-            <p className="text-zinc-500 text-xs tracking-[0.2em]">
+            <p className="text-xs tracking-[0.2em] text-zinc-500">
               ТЕКУЩАЯ ИГРА
             </p>
 
             <p className="text-2xl font-black mt-4">
-              {game?.name || "Нет игры"}
+              {game?.name ||
+                "Нет игры"}
             </p>
 
-            <p className="text-zinc-600 text-sm mt-2">
-              {game?.status === "active"
+            <p className="text-sm text-zinc-500 mt-2">
+
+              {game?.status ===
+              "active"
                 ? "Игра идёт"
-                : game?.status === "finished"
-                  ? "Завершена"
-                  : "Не запущена"}
+                : game?.status ===
+                  "completed"
+                ? "Завершена"
+                : "Ожидание"}
+
             </p>
 
           </div>
 
-          {/* LIVE */}
+          {/* CONNECTION */}
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
 
-            <p className="text-zinc-500 text-xs tracking-[0.2em]">
+            <p className="text-xs tracking-[0.2em] text-zinc-500">
               СОЕДИНЕНИЕ
             </p>
 
-            <p className="text-2xl font-black mt-4 text-[#C8FF3D]">
+            <p className="text-2xl font-black text-[#C8FF3D] mt-4">
               ● LIVE
             </p>
 
-            <p className="text-zinc-600 text-sm mt-2">
-              Realtime подключён
+            <p className="text-sm text-zinc-500 mt-2">
+              Realtime подключен
             </p>
 
           </div>
 
         </div>
 
-        {/* --------------------------------- */}
-        {/* QR + PLAYERS */}
-        {/* --------------------------------- */}
+        {/* ============================================
+            QR + PLAYERS
+        ============================================ */}
 
-        <div className="grid lg:grid-cols-[320px_1fr] gap-6">
+        <div className="grid lg:grid-cols-[260px_1fr] gap-6 mt-6">
 
           {/* QR */}
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 flex flex-col items-center">
 
-            <p className="text-zinc-500 text-xs tracking-[0.2em] text-center">
+            <p className="text-xs tracking-[0.2em] text-zinc-500 mb-5">
               QR-КОД ДЛЯ ГОСТЕЙ
             </p>
 
-            <div className="flex justify-center mt-6">
+            {joinUrl && (
+              <div className="bg-white p-4 rounded-2xl">
 
-              {joinUrl && (
-                <div className="bg-white p-4 rounded-3xl">
+                <QRCodeSVG
+                  value={joinUrl}
+                  size={180}
+                  level="H"
+                />
 
-                  <QRCodeSVG
-                    value={joinUrl}
-                    size={220}
-                    level="H"
-                  />
+              </div>
+            )}
 
-                </div>
-              )}
-
-            </div>
-
-            <p className="text-zinc-500 text-sm text-center mt-6">
+            <p className="text-xs text-zinc-600 text-center mt-5">
               Гости сканируют этот QR-код
             </p>
 
-            <div className="mt-6 text-center">
+            <p className="text-xs text-zinc-600 mt-5">
+              КОД
+            </p>
 
-              <p className="text-zinc-600 text-xs tracking-widest">
-                КОД
-              </p>
-
-              <p className="text-3xl font-black tracking-[0.2em] text-[#C8FF3D] mt-2">
-                {eventCode}
-              </p>
-
-            </div>
+            <p className="text-2xl font-black tracking-widest text-[#C8FF3D] mt-2">
+              {eventCode}
+            </p>
 
           </div>
 
           {/* PLAYERS */}
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7">
 
-            <div className="flex items-end justify-between mb-7">
+            <div className="flex items-end justify-between mb-6">
 
               <div>
 
-                <p className="text-zinc-500 text-sm tracking-[0.15em]">
+                <p className="text-xs tracking-[0.2em] text-zinc-500">
                   ПОДКЛЮЧИВШИЕСЯ ГОСТИ
                 </p>
 
@@ -493,46 +783,50 @@ function HostPageContent() {
 
               </div>
 
-              <div className="text-[#C8FF3D] text-sm">
+              <div className="text-[#C8FF3D] text-xs">
                 ● LIVE
               </div>
 
             </div>
 
-            {players.length === 0 ? (
+            {players.length ===
+            0 ? (
 
-              <div className="min-h-[300px] flex items-center justify-center text-zinc-600">
+              <div className="py-16 text-center text-zinc-600">
                 Пока никто не подключился
               </div>
 
             ) : (
 
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
-                {players.map((player, index) => (
+                {players.map(
+                  (player, index) => (
 
-                  <div
-                    key={player.id}
-                    className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
-                  >
+                    <div
+                      key={player.id}
+                      className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"
+                    >
 
-                    <div className="text-[#C8FF3D] text-sm">
-                      #{index + 1}
-                    </div>
-
-                    <div className="font-bold text-xl mt-2">
-                      {player.name}
-                    </div>
-
-                    {player.table_number && (
-                      <div className="text-zinc-500 text-sm mt-1">
-                        Стол {player.table_number}
+                      <div className="text-[#C8FF3D] text-xs">
+                        #{index + 1}
                       </div>
-                    )}
 
-                  </div>
+                      <div className="font-bold text-lg mt-2">
+                        {player.name}
+                      </div>
 
-                ))}
+                      {player.table_number && (
+                        <div className="text-zinc-500 text-sm mt-1">
+                          Стол{" "}
+                          {player.table_number}
+                        </div>
+                      )}
+
+                    </div>
+
+                  )
+                )}
 
               </div>
 
@@ -542,79 +836,285 @@ function HostPageContent() {
 
         </div>
 
-        {/* --------------------------------- */}
-        {/* GAME CONTROL */}
-        {/* --------------------------------- */}
+        {/* ============================================
+            GAME MANAGEMENT
+        ============================================ */}
 
-        <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-8">
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7 mt-6">
 
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-7">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
 
             <div>
 
-              <p className="text-zinc-500 text-xs tracking-[0.2em]">
+              <p className="text-xs tracking-[0.2em] text-zinc-500">
                 УПРАВЛЕНИЕ ИГРОЙ
               </p>
 
-              <h2 className="text-3xl font-black mt-3">
-                {game?.name || "Викторина"}
+              <h2 className="text-3xl font-black mt-2">
+                Викторина
               </h2>
 
               <p className="text-zinc-500 mt-2">
-
-                {game?.status === "active"
-                  ? "Викторина сейчас идёт"
-                  : game?.status === "finished"
-                    ? "Предыдущая игра завершена"
-                    : "Игра готова к запуску"}
-
+                Вопросов создано:{" "}
+                {questions.length}
               </p>
 
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={startGame}
+              disabled={
+                startingGame ||
+                questions.length ===
+                  0 ||
+                game?.status ===
+                  "active"
+              }
+              className="rounded-2xl bg-[#C8FF3D] px-7 py-4 font-black text-[#101014] disabled:opacity-30"
+            >
 
-              {game?.status === "active" ? (
+              {game?.status ===
+              "active"
+                ? "ИГРА ИДЁТ"
+                : startingGame
+                ? "ЗАПУСКАЕМ..."
+                : "НАЧАТЬ ИГРУ"}
 
-                <>
-                  <div className="px-6 py-3 rounded-xl bg-[#C8FF3D] text-[#101014] font-black">
-                    ● ИГРА ИДЁТ
-                  </div>
+            </button>
+
+          </div>
+
+        </div>
+
+        {/* ============================================
+            CREATE QUESTION
+        ============================================ */}
+
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7 mt-6">
+
+          <p className="text-xs tracking-[0.2em] text-zinc-500">
+            СОЗДАНИЕ ВОПРОСА
+          </p>
+
+          <h2 className="text-2xl font-black mt-2">
+            Новый вопрос
+          </h2>
+
+          <textarea
+            value={questionText}
+            onChange={(e) =>
+              setQuestionText(
+                e.target.value
+              )
+            }
+            placeholder="Например: В каком году появился MOMENTO?"
+            className="w-full min-h-[120px] mt-6 rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 outline-none resize-none placeholder:text-zinc-700 focus:border-[#C8FF3D]"
+          />
+
+          {/* ANSWERS */}
+
+          <div className="grid md:grid-cols-2 gap-4 mt-4">
+
+            {answerTexts.map(
+              (answer, index) => (
+
+                <div
+                  key={index}
+                  className="flex gap-3 items-center"
+                >
 
                   <button
-                    onClick={stopGame}
-                    className="px-6 py-3 rounded-xl border border-white/10 text-white font-bold hover:bg-white/10 transition"
+                    type="button"
+                    onClick={() =>
+                      setCorrectAnswer(
+                        index
+                      )
+                    }
+                    className={`w-12 h-12 rounded-xl border font-black shrink-0 transition ${
+                      correctAnswer ===
+                      index
+                        ? "bg-[#C8FF3D] text-[#101014] border-[#C8FF3D]"
+                        : "border-white/10 bg-white/[0.04] text-zinc-500"
+                    }`}
                   >
-                    ЗАВЕРШИТЬ
+                    {String.fromCharCode(
+                      65 + index
+                    )}
                   </button>
-                </>
 
-              ) : (
+                  <input
+                    value={answer}
+                    onChange={(e) => {
 
-                <button
-                  onClick={startQuiz}
-                  disabled={startingGame}
-                  className="px-8 py-4 rounded-xl bg-[#C8FF3D] text-[#101014] font-black hover:scale-[1.02] active:scale-[0.98] transition disabled:opacity-50"
-                >
-                  {startingGame
-                    ? "ЗАПУСК..."
-                    : "НАЧАТЬ ИГРУ"}
-                </button>
+                      const updated =
+                        [
+                          ...answerTexts,
+                        ];
 
+                      updated[index] =
+                        e.target.value;
+
+                      setAnswerTexts(
+                        updated
+                      );
+
+                    }}
+                    placeholder={`Вариант ${String.fromCharCode(
+                      65 + index
+                    )}`}
+                    className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 outline-none placeholder:text-zinc-700 focus:border-[#C8FF3D]"
+                  />
+
+                </div>
+
+              )
+            )}
+
+          </div>
+
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 mt-6">
+
+            <p className="text-sm text-zinc-600">
+              Нажмите A / B / C / D,
+              чтобы выбрать правильный
+              ответ.
+            </p>
+
+            <button
+              type="button"
+              onClick={createQuestion}
+              disabled={
+                creatingQuestion
+              }
+              className="rounded-2xl border border-[#C8FF3D] px-7 py-4 font-black text-[#C8FF3D] hover:bg-[#C8FF3D] hover:text-[#101014] transition disabled:opacity-30"
+            >
+
+              {creatingQuestion
+                ? "СОЗДАЁМ..."
+                : "ДОБАВИТЬ ВОПРОС"}
+
+            </button>
+
+          </div>
+
+        </div>
+
+        {/* ============================================
+            QUESTIONS LIST
+        ============================================ */}
+
+        {questions.length > 0 && (
+
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7 mt-6">
+
+            <p className="text-xs tracking-[0.2em] text-zinc-500">
+              ВОПРОСЫ ИГРЫ
+            </p>
+
+            <div className="mt-5 space-y-3">
+
+              {questions.map(
+                (question, index) => {
+
+                  const questionAnswers =
+                    getQuestionAnswers(
+                      question.id
+                    );
+
+                  const isCurrent =
+                    game?.current_question_id ===
+                    question.id;
+
+                  return (
+                    <div
+                      key={
+                        question.id
+                      }
+                      className={`rounded-2xl border p-5 ${
+                        isCurrent
+                          ? "border-[#C8FF3D]/40 bg-[#C8FF3D]/5"
+                          : "border-white/10 bg-white/[0.02]"
+                      }`}
+                    >
+
+                      <div className="flex items-start gap-4">
+
+                        <div className="text-[#C8FF3D] font-black">
+                          #{index + 1}
+                        </div>
+
+                        <div className="flex-1">
+
+                          <div className="font-bold text-lg">
+                            {
+                              question.question
+                            }
+                          </div>
+
+                          <div className="grid md:grid-cols-2 gap-2 mt-4">
+
+                            {questionAnswers.map(
+                              (answer) => (
+
+                                <div
+                                  key={
+                                    answer.id
+                                  }
+                                  className={`rounded-xl px-4 py-3 text-sm ${
+                                    answer.is_correct
+                                      ? "bg-[#C8FF3D]/10 text-[#C8FF3D]"
+                                      : "bg-white/[0.03] text-zinc-500"
+                                  }`}
+                                >
+
+                                  {
+                                    answer.text
+                                  }
+
+                                  {answer.is_correct && (
+                                    <span className="ml-2">
+                                      ✓
+                                    </span>
+                                  )}
+
+                                </div>
+
+                              )
+                            )}
+
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                    </div>
+                  );
+                }
               )}
 
             </div>
 
           </div>
 
-        </div>
+        )}
 
-        {/* --------------------------------- */}
+        {/* ============================================
+            ERROR
+        ============================================ */}
+
+        {error && (
+
+          <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/5 px-5 py-4 text-red-400">
+            {error}
+          </div>
+
+        )}
+
         {/* FOOTER */}
-        {/* --------------------------------- */}
 
         <div className="text-center mt-10 text-xs tracking-[0.3em] text-zinc-700">
-          MOMENTO HOST · YOUR EVENT. YOUR MOMENTS.
+          YOUR EVENT. YOUR MOMENTS.
         </div>
 
       </div>
@@ -623,30 +1123,32 @@ function HostPageContent() {
   );
 }
 
-// ---------------------------------------
-// SUSPENSE WRAPPER
-// ---------------------------------------
+// ======================================================
+// PAGE WRAPPER WITH SUSPENSE
+// ======================================================
 
 export default function HostPage() {
   return (
     <Suspense
       fallback={
         <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
+
           <div className="text-center">
 
             <p className="text-xs tracking-[0.35em] text-[#C8FF3D]">
               MOMENTO HOST
             </p>
 
-            <p className="text-zinc-500 mt-4">
+            <p className="mt-5 text-zinc-500">
               Загрузка...
             </p>
 
           </div>
+
         </main>
       }
     >
-      <HostPageContent />
+      <HostContent />
     </Suspense>
   );
 }
