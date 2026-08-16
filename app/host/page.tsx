@@ -51,7 +51,6 @@ function HostContent() {
   const [loading, setLoading] = useState(true);
   const [creatingQuestion, setCreatingQuestion] = useState(false);
   const [startingGame, setStartingGame] = useState(false);
-  const [questionLoading, setQuestionLoading] = useState(false);
 
   const [questionText, setQuestionText] = useState("");
 
@@ -158,13 +157,12 @@ function HostContent() {
   // LOAD QUESTIONS
   // ==================================================
 
-  async function loadQuestions(gameId: string) {
+  async function loadQuestions(id: string) {
     const { data, error } = await supabase
       .from("questions")
       .select(
         "id, game_id, question, media_url, media_type"
       )
-      .eq("game_id", gameId)
       .order("created_at", {
         ascending: true,
       });
@@ -223,23 +221,11 @@ function HostContent() {
 
       if (!event) return;
 
-      await loadPlayers(event.id);
-      await loadGame(event.id);
-
-      const { data: currentGame } = await supabase
-        .from("games")
-        .select("id")
-        .eq("event_id", event.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (currentGame) {
-        await loadQuestions(currentGame.id);
-      } else {
-        setQuestions([]);
-        setAnswers([]);
-      }
+      await Promise.all([
+        loadPlayers(event.id),
+        loadGame(event.id),
+        loadQuestions(event.id),
+      ]);
 
       setLoading(false);
     }
@@ -296,9 +282,7 @@ function HostContent() {
           table: "questions",
         },
         () => {
-          if (game?.id) {
-            loadQuestions(game.id);
-          }
+          loadQuestions(eventId);
         }
       )
       .subscribe();
@@ -432,7 +416,7 @@ function HostContent() {
       setCorrectAnswer(0);
 
       await loadGame(eventId);
-     await loadQuestions(eventId);
+      await loadQuestions(eventId);
     } catch (err) {
       console.error(err);
 
@@ -538,115 +522,6 @@ function HostContent() {
     } finally {
       setStartingGame(false);
     }
-  }
-
-  // ==================================================
-  // QUIZ CONTROLS
-  // ==================================================
-
-  async function showFirstQuestion() {
-    if (!game || questions.length === 0) return;
-
-    setQuestionLoading(true);
-    setError("");
-
-    const { data, error } = await supabase
-      .from("games")
-      .update({
-        status: "active",
-        current_question_id: questions[0].id,
-      })
-      .eq("id", game.id)
-      .select()
-      .single();
-
-    if (error || !data) {
-      setError(error?.message || "Не удалось открыть вопрос");
-    } else {
-      setGame(data);
-    }
-
-    setQuestionLoading(false);
-  }
-
-  async function nextQuestion() {
-    if (!game || questions.length === 0) return;
-
-    const currentIndex = questions.findIndex(
-      (question) => question.id === game.current_question_id
-    );
-
-    const nextIndex = currentIndex + 1;
-
-    if (currentIndex === -1) {
-      await showFirstQuestion();
-      return;
-    }
-
-    if (nextIndex >= questions.length) {
-      await finishGame();
-      return;
-    }
-
-    await setCurrentQuestion(questions[nextIndex].id);
-  }
-
-  async function previousQuestion() {
-    if (!game || questions.length === 0) return;
-
-    const currentIndex = questions.findIndex(
-      (question) => question.id === game.current_question_id
-    );
-
-    if (currentIndex <= 0) return;
-
-    await setCurrentQuestion(questions[currentIndex - 1].id);
-  }
-
-  async function setCurrentQuestion(questionId: string) {
-    if (!game) return;
-
-    setQuestionLoading(true);
-    setError("");
-
-    const { data, error } = await supabase
-      .from("games")
-      .update({
-        status: "active",
-        current_question_id: questionId,
-      })
-      .eq("id", game.id)
-      .select()
-      .single();
-
-    if (error || !data) {
-      setError(error?.message || "Не удалось переключить вопрос");
-    } else {
-      setGame(data);
-    }
-
-    setQuestionLoading(false);
-  }
-
-  async function finishGame() {
-    if (!game) return;
-
-    const { data, error } = await supabase
-      .from("games")
-      .update({
-        status: "completed",
-        current_question_id: null,
-      })
-      .eq("id", game.id)
-      .select()
-      .single();
-
-    if (error || !data) {
-      setError(error?.message || "Не удалось завершить игру");
-      return;
-    }
-
-    setGame(data);
   }
 
   // ==================================================
@@ -967,154 +842,43 @@ function HostContent() {
 
         <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7 mt-6">
 
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
 
-            <div className="flex-1">
+            <div>
 
               <p className="text-xs tracking-[0.2em] text-zinc-500">
-                УПРАВЛЕНИЕ ВИКТОРИНОЙ
+                УПРАВЛЕНИЕ ИГРОЙ
               </p>
 
-              <div className="flex flex-wrap items-center gap-4 mt-2">
-                <h2 className="text-3xl font-black">
-                  Викторина
-                </h2>
-
-                {game?.status === "active" && (
-                  <span className="rounded-full bg-[#C8FF3D]/10 px-3 py-1 text-xs font-bold text-[#C8FF3D]">
-                    ● ИГРА ИДЁТ
-                  </span>
-                )}
-
-                {game?.status === "completed" && (
-                  <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-zinc-400">
-                    ЗАВЕРШЕНА
-                  </span>
-                )}
-              </div>
+              <h2 className="text-3xl font-black mt-2">
+                Викторина
+              </h2>
 
               <p className="text-zinc-500 mt-2">
-                Вопросов создано: {questions.length}
+                Вопросов создано:{" "}
+                {questions.length}
               </p>
 
             </div>
 
-            {!game || game.status === "waiting" || game.status === "completed" ? (
-              <button
-                onClick={startGame}
-                disabled={startingGame || questions.length === 0}
-                className="rounded-2xl bg-[#C8FF3D] px-7 py-4 font-black text-[#101014] disabled:opacity-30"
-              >
-                {startingGame ? "ЗАПУСКАЕМ..." : "НАЧАТЬ ИГРУ"}
-              </button>
-            ) : null}
+            <button
+              onClick={startGame}
+              disabled={
+                startingGame ||
+                questions.length === 0
+              }
+              className="rounded-2xl bg-[#C8FF3D] px-7 py-4 font-black text-[#101014] disabled:opacity-30"
+            >
+
+              {startingGame
+                ? "ЗАПУСКАЕМ..."
+                : game?.status === "active" && game?.current_question_id
+                ? "ПЕРЕЗАПУСТИТЬ ИГРУ"
+                : "НАЧАТЬ ИГРУ"}
+
+            </button>
 
           </div>
-
-          {game?.status === "active" && (
-            <div className="mt-7 border-t border-white/10 pt-7">
-
-              {!game.current_question_id ? (
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
-                  <div>
-                    <p className="text-zinc-400">
-                      Игра запущена. Выберите первый вопрос.
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={showFirstQuestion}
-                    disabled={questionLoading || questions.length === 0}
-                    className="rounded-2xl bg-[#C8FF3D] px-7 py-4 font-black text-[#101014] disabled:opacity-30"
-                  >
-                    {questionLoading ? "ОТКРЫВАЕМ..." : "ПОКАЗАТЬ ПЕРВЫЙ ВОПРОС"}
-                  </button>
-                </div>
-              ) : (
-                (() => {
-                  const currentIndex = questions.findIndex(
-                    (question) => question.id === game.current_question_id
-                  );
-                  const currentQuestion = questions[currentIndex];
-                  const currentAnswers = currentQuestion
-                    ? getQuestionAnswers(currentQuestion.id)
-                    : [];
-
-                  return (
-                    <div>
-                      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-
-                        <div className="flex-1">
-                          <p className="text-xs tracking-[0.2em] text-[#C8FF3D]">
-                            ВОПРОС {currentIndex + 1} / {questions.length}
-                          </p>
-
-                          <h3 className="text-2xl md:text-3xl font-black mt-3">
-                            {currentQuestion?.question || "Вопрос не найден"}
-                          </h3>
-                        </div>
-
-                        <div className="flex flex-wrap gap-3">
-                          <button
-                            onClick={previousQuestion}
-                            disabled={questionLoading || currentIndex <= 0}
-                            className="rounded-2xl border border-white/10 px-5 py-4 font-bold disabled:opacity-30"
-                          >
-                            ← НАЗАД
-                          </button>
-
-                          <button
-                            onClick={nextQuestion}
-                            disabled={questionLoading}
-                            className="rounded-2xl bg-[#C8FF3D] px-6 py-4 font-black text-[#101014] disabled:opacity-30"
-                          >
-                            {currentIndex === questions.length - 1
-                              ? "ЗАВЕРШИТЬ →"
-                              : "СЛЕДУЮЩИЙ →"}
-                          </button>
-
-                          <button
-                            onClick={finishGame}
-                            className="rounded-2xl border border-white/10 px-5 py-4 font-bold hover:bg-white/10"
-                          >
-                            ЗАВЕРШИТЬ ИГРУ
-                          </button>
-                        </div>
-
-                      </div>
-
-                      {currentAnswers.length > 0 && (
-                        <div className="grid md:grid-cols-2 gap-3 mt-6">
-                          {currentAnswers.map((answer, index) => (
-                            <div
-                              key={answer.id}
-                              className={`rounded-2xl border p-4 ${
-                                answer.is_correct
-                                  ? "border-[#C8FF3D]/40 bg-[#C8FF3D]/10"
-                                  : "border-white/10 bg-white/[0.02]"
-                              }`}
-                            >
-                              <span className="font-black text-[#C8FF3D] mr-3">
-                                {String.fromCharCode(65 + index)}
-                              </span>
-                              {answer.text}
-                              {answer.is_correct && (
-                                <span className="ml-3 text-xs text-[#C8FF3D]">
-                                  ✓ ПРАВИЛЬНЫЙ
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                    </div>
-                  );
-                })()
-              )}
-
-            </div>
-          )}
 
         </div>
 
