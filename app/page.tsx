@@ -26,7 +26,7 @@ function HomeContent() {
   const [loadingEvent, setLoadingEvent] = useState(false);
 
   // ---------------------------------------
-  // GENERATE EVENT CODE
+  // СОЗДАНИЕ КОДА
   // ---------------------------------------
 
   function generateCode() {
@@ -37,7 +37,7 @@ function HomeContent() {
   }
 
   // ---------------------------------------
-  // LOAD PLAYERS
+  // ЗАГРУЗКА ИГРОКОВ
   // ---------------------------------------
 
   async function loadPlayers(id: string) {
@@ -56,7 +56,7 @@ function HomeContent() {
   }
 
   // ---------------------------------------
-  // LOAD EVENT FROM URL
+  // ЗАГРУЗКА МЕРОПРИЯТИЯ ИЗ URL
   // ---------------------------------------
 
   useEffect(() => {
@@ -95,14 +95,14 @@ function HomeContent() {
   }, [searchParams]);
 
   // ---------------------------------------
-  // REALTIME PLAYERS
+  // REALTIME ИГРОКОВ
   // ---------------------------------------
 
   useEffect(() => {
     if (!eventId) return;
 
     const channel = supabase
-      .channel(`momento-public-${eventId}`)
+      .channel(`momento-public-players-${eventId}`)
       .on(
         "postgres_changes",
         {
@@ -123,7 +123,7 @@ function HomeContent() {
   }, [eventId]);
 
   // ---------------------------------------
-  // CREATE EVENT
+  // СОЗДАНИЕ МЕРОПРИЯТИЯ
   // ---------------------------------------
 
   async function createEvent() {
@@ -149,23 +149,44 @@ function HomeContent() {
 
     if (error) {
       console.error("Ошибка создания мероприятия:", error);
+
       setError(error.message);
       setLoading(false);
+
       return;
     }
 
-    // После создания автоматически открываем HOST
-    router.push(`/host?event=${encodeURIComponent(data.code)}`);
+    // ---------------------------------------
+    // НОВЫЙ HOST
+    // ---------------------------------------
+
+    const hostUrl =
+      `${window.location.origin}/host?event=${encodeURIComponent(data.code)}`;
+
+    // ---------------------------------------
+    // ОТКРЫВАЕМ HOST В НОВОЙ ВКЛАДКЕ
+    // ---------------------------------------
+
+    window.open(hostUrl, "_blank");
+
+    // ---------------------------------------
+    // ТЕКУЩУЮ ВКЛАДКУ ДЕЛАЕМ PUBLIC SCREEN
+    // ---------------------------------------
+
+    router.push(
+      `/?event=${encodeURIComponent(data.code)}`
+    );
   }
 
   // ---------------------------------------
-  // LOADING EVENT
+  // ЗАГРУЗКА
   // ---------------------------------------
 
   if (loadingEvent) {
     return (
       <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
         <div className="text-center">
+
           <p className="text-xs tracking-[0.35em] text-[#C8FF3D]">
             MOMENTO LIVE
           </p>
@@ -173,13 +194,14 @@ function HomeContent() {
           <p className="mt-5 text-zinc-500">
             Загрузка мероприятия...
           </p>
+
         </div>
       </main>
     );
   }
 
   // ---------------------------------------
-  // PUBLIC EVENT SCREEN
+  // PUBLIC SCREEN
   // ---------------------------------------
 
   if (eventCode) {
@@ -192,11 +214,13 @@ function HomeContent() {
 
     return (
       <main className="min-h-screen bg-[#101014] text-white px-6 py-10">
+
         <div className="max-w-7xl mx-auto">
 
           {/* HEADER */}
 
           <div className="text-center mb-12">
+
             <p className="text-xs tracking-[0.4em] text-[#C8FF3D]">
               MOMENTO LIVE
             </p>
@@ -208,6 +232,7 @@ function HomeContent() {
             <p className="text-zinc-500 text-lg mt-4">
               Подключайтесь к игре
             </p>
+
           </div>
 
           {/* MAIN */}
@@ -224,11 +249,13 @@ function HomeContent() {
 
               {joinUrl && (
                 <div className="bg-white p-5 rounded-3xl">
+
                   <QRCodeSVG
                     value={joinUrl}
                     size={250}
                     level="H"
                   />
+
                 </div>
               )}
 
@@ -259,6 +286,7 @@ function HomeContent() {
               <div className="flex items-end justify-between mb-8">
 
                 <div>
+
                   <p className="text-zinc-500 text-sm tracking-widest">
                     ПОДКЛЮЧИЛИСЬ
                   </p>
@@ -266,6 +294,7 @@ function HomeContent() {
                   <p className="text-6xl font-black mt-2">
                     {players.length}
                   </p>
+
                 </div>
 
                 <div className="text-[#C8FF3D] text-sm">
@@ -275,13 +304,17 @@ function HomeContent() {
               </div>
 
               {players.length === 0 ? (
+
                 <div className="min-h-[300px] flex items-center justify-center text-zinc-600">
                   Пока никто не подключился
                 </div>
+
               ) : (
+
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
 
                   {players.map((player, index) => (
+
                     <div
                       key={player.id}
                       className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
@@ -302,9 +335,11 @@ function HomeContent() {
                       )}
 
                     </div>
+
                   ))}
 
                 </div>
+
               )}
 
             </div>
@@ -318,6 +353,7 @@ function HomeContent() {
           </div>
 
         </div>
+
       </main>
     );
   }
@@ -328,6 +364,7 @@ function HomeContent() {
 
   return (
     <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center px-6">
+
       <div className="w-full max-w-2xl text-center">
 
         <div className="text-sm tracking-[0.35em] text-[#C8FF3D]">
@@ -372,12 +409,13 @@ function HomeContent() {
         </div>
 
       </div>
+
     </main>
   );
 }
 
 // ---------------------------------------
-// SUSPENSE WRAPPER
+// SUSPENSE
 // ---------------------------------------
 
 export default function Home() {
@@ -385,7 +423,19 @@ export default function Home() {
     <Suspense
       fallback={
         <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
-          Загрузка MOMENTO...
+
+          <div className="text-center">
+
+            <p className="text-xs tracking-[0.35em] text-[#C8FF3D]">
+              MOMENTO
+            </p>
+
+            <p className="text-zinc-500 mt-4">
+              Загрузка...
+            </p>
+
+          </div>
+
         </main>
       }
     >
