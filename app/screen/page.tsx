@@ -6,7 +6,15 @@ import {
   useState,
 } from "react";
 import { useSearchParams } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 import { createClient } from "../utils/supabase/client";
+
+type Game = {
+  id: string;
+  event_id: string;
+  status: string;
+  current_question_id: string | null;
+};
 
 type Question = {
   id: string;
@@ -22,75 +30,56 @@ type Answer = {
   is_correct: boolean;
 };
 
-type Game = {
-  id: string;
-  event_id: string;
-  status: string;
-  current_question_id: string | null;
-};
-
 function ScreenContent() {
   const supabase = createClient();
   const searchParams = useSearchParams();
 
   const [eventCode, setEventCode] = useState("");
   const [eventId, setEventId] = useState("");
-
   const [game, setGame] = useState<Game | null>(null);
-  const [question, setQuestion] =
-    useState<Question | null>(null);
+  const [question, setQuestion] = useState<Question | null>(null);
   const [answers, setAnswers] = useState<Answer[]>([]);
-
   const [loading, setLoading] = useState(true);
 
   // =====================================================
-  // EVENT CODE
+  // Получаем код мероприятия
   // =====================================================
 
   useEffect(() => {
-    const code = searchParams.get("event");
+    const urlCode = searchParams.get("event");
 
-    if (!code) {
-      setLoading(false);
+    if (urlCode) {
+      const code = urlCode.trim().toUpperCase();
+
+      setEventCode(code);
+
+      localStorage.setItem(
+        "momento_event_code",
+        code
+      );
+
       return;
     }
 
-    setEventCode(code.trim().toUpperCase());
+    const savedCode =
+      localStorage.getItem(
+        "momento_event_code"
+      );
+
+    if (savedCode) {
+      setEventCode(
+        savedCode.trim().toUpperCase()
+      );
+    } else {
+      setLoading(false);
+    }
   }, [searchParams]);
 
   // =====================================================
-  // LOAD GAME
+  // Загружаем вопрос
   // =====================================================
 
-  async function loadGame(id: string) {
-    const { data, error } = await supabase
-      .from("games")
-      .select(
-        "id, event_id, status, current_question_id"
-      )
-      .eq("event_id", id)
-      .eq("type", "quiz")
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error(error);
-      return null;
-    }
-
-    setGame(data || null);
-
-    return data;
-  }
-
-  // =====================================================
-  // LOAD CURRENT QUESTION
-  // =====================================================
-
-  async function loadCurrentQuestion(
+  async function loadQuestion(
     questionId: string | null
   ) {
     if (!questionId) {
@@ -111,7 +100,10 @@ function ScreenContent() {
       .single();
 
     if (questionError) {
-      console.error(questionError);
+      console.error(
+        "Ошибка загрузки вопроса:",
+        questionError
+      );
       return;
     }
 
@@ -131,7 +123,10 @@ function ScreenContent() {
       });
 
     if (answerError) {
-      console.error(answerError);
+      console.error(
+        "Ошибка загрузки ответов:",
+        answerError
+      );
       return;
     }
 
@@ -139,7 +134,47 @@ function ScreenContent() {
   }
 
   // =====================================================
-  // INITIAL LOAD
+  // Загружаем текущую игру
+  // =====================================================
+
+  async function loadGame(id: string) {
+    const {
+      data,
+      error,
+    } = await supabase
+      .from("games")
+      .select(
+        "id, event_id, status, current_question_id"
+      )
+      .eq("event_id", id)
+      .eq("type", "quiz")
+      .order("created_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "Ошибка загрузки игры:",
+        error
+      );
+      return null;
+    }
+
+    setGame(data || null);
+
+    if (data) {
+      await loadQuestion(
+        data.current_question_id
+      );
+    }
+
+    return data;
+  }
+
+  // =====================================================
+  // Инициализация
   // =====================================================
 
   useEffect(() => {
@@ -158,21 +193,18 @@ function ScreenContent() {
         .single();
 
       if (error || !event) {
-        console.error(error);
+        console.error(
+          "Мероприятие не найдено:",
+          error
+        );
+
         setLoading(false);
         return;
       }
 
       setEventId(event.id);
 
-      const currentGame =
-        await loadGame(event.id);
-
-      if (currentGame) {
-        await loadCurrentQuestion(
-          currentGame.current_question_id
-        );
-      }
+      await loadGame(event.id);
 
       setLoading(false);
     }
@@ -181,14 +213,16 @@ function ScreenContent() {
   }, [eventCode]);
 
   // =====================================================
-  // REALTIME GAME
+  // REALTIME
   // =====================================================
 
   useEffect(() => {
     if (!eventId) return;
 
     const channel = supabase
-      .channel(`screen-game-${eventId}`)
+      .channel(
+        `momento-screen-${eventId}`
+      )
       .on(
         "postgres_changes",
         {
@@ -198,12 +232,17 @@ function ScreenContent() {
           filter: `event_id=eq.${eventId}`,
         },
         async (payload) => {
+          console.log(
+            "GAME UPDATE:",
+            payload
+          );
+
           const updatedGame =
             payload.new as Game;
 
           setGame(updatedGame);
 
-          await loadCurrentQuestion(
+          await loadQuestion(
             updatedGame.current_question_id
           );
         }
@@ -222,15 +261,17 @@ function ScreenContent() {
   if (loading) {
     return (
       <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
-        <div className="text-3xl font-black">
+
+        <div className="text-3xl font-black tracking-[0.2em]">
           MOMENTO LIVE
         </div>
+
       </main>
     );
   }
 
   // =====================================================
-  // NO EVENT
+  // EVENT NOT FOUND
   // =====================================================
 
   if (!eventId) {
@@ -243,39 +284,12 @@ function ScreenContent() {
             MOMENTO LIVE
           </p>
 
-          <h1 className="text-6xl font-black mt-6">
+          <h1 className="text-5xl font-black mt-6">
             МЕРОПРИЯТИЕ НЕ НАЙДЕНО
           </h1>
 
-        </div>
-
-      </main>
-    );
-  }
-
-  // =====================================================
-  // WAITING
-  // =====================================================
-
-  if (
-    !game ||
-    game.status === "waiting"
-  ) {
-    return (
-      <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center px-10">
-
-        <div className="text-center">
-
-          <p className="text-[#C8FF3D] text-sm tracking-[0.5em]">
-            MOMENTO LIVE
-          </p>
-
-          <h1 className="text-8xl font-black mt-8">
-            {eventCode}
-          </h1>
-
-          <p className="text-2xl text-zinc-500 mt-8">
-            Подключайтесь к игре
+          <p className="text-zinc-600 mt-4">
+            Проверьте код мероприятия
           </p>
 
         </div>
@@ -284,13 +298,20 @@ function ScreenContent() {
     );
   }
 
+  const joinUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/join?code=${encodeURIComponent(
+          eventCode
+        )}`
+      : "";
+
   // =====================================================
-  // COMPLETED
+  // ИГРА ЗАВЕРШЕНА
   // =====================================================
 
-  if (game.status === "completed") {
+  if (game?.status === "completed") {
     return (
-      <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center px-10">
+      <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
 
         <div className="text-center">
 
@@ -298,11 +319,11 @@ function ScreenContent() {
             MOMENTO LIVE
           </p>
 
-          <h1 className="text-8xl font-black mt-8">
+          <h1 className="text-7xl md:text-9xl font-black mt-8">
             ИГРА ЗАВЕРШЕНА
           </h1>
 
-          <p className="text-2xl text-zinc-500 mt-8">
+          <p className="text-2xl text-zinc-500 mt-6">
             Спасибо за участие
           </p>
 
@@ -313,25 +334,59 @@ function ScreenContent() {
   }
 
   // =====================================================
-  // GAME STARTED / WAITING QUESTION
+  // НЕТ ТЕКУЩЕГО ВОПРОСА
+  // QR-КОД ПОКАЗЫВАЕТСЯ ЗДЕСЬ
   // =====================================================
 
   if (!question) {
     return (
-      <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
+      <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center px-8">
 
-        <div className="text-center">
+        <div className="w-full max-w-6xl text-center">
 
-          <p className="text-[#C8FF3D] text-sm tracking-[0.5em]">
+          <p className="text-[#C8FF3D] text-sm md:text-base tracking-[0.55em]">
             MOMENTO LIVE
           </p>
 
-          <h1 className="text-7xl font-black mt-8">
-            ГОТОВЫ?
+          <h1 className="text-7xl md:text-9xl font-black mt-5 tracking-[-0.05em]">
+            {eventCode}
           </h1>
 
-          <p className="text-2xl text-zinc-500 mt-6">
-            Игра начинается...
+          <p className="text-2xl md:text-3xl text-zinc-500 mt-4">
+            Подключайтесь к игре
+          </p>
+
+          {/* QR */}
+
+          <div className="mt-10 flex flex-col items-center">
+
+            <div className="bg-white p-6 rounded-[2rem]">
+
+              <QRCodeSVG
+                value={joinUrl}
+                size={320}
+                level="H"
+                includeMargin
+              />
+
+            </div>
+
+            <p className="text-xl text-zinc-400 mt-7">
+              Отсканируйте QR-код телефоном
+            </p>
+
+            <p className="text-zinc-600 mt-2">
+              или введите код вручную
+            </p>
+
+            <div className="text-[#C8FF3D] text-4xl font-black tracking-[0.35em] mt-4">
+              {eventCode}
+            </div>
+
+          </div>
+
+          <p className="text-zinc-800 text-xs tracking-[0.4em] mt-12">
+            YOUR EVENT. YOUR MOMENTS.
           </p>
 
         </div>
@@ -341,55 +396,49 @@ function ScreenContent() {
   }
 
   // =====================================================
-  // QUESTION SCREEN
+  // ВОПРОС
   // =====================================================
 
   return (
-    <main className="min-h-screen bg-[#101014] text-white px-10 py-12">
+    <main className="min-h-screen bg-[#101014] text-white px-8 md:px-14 py-8">
 
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[1500px] mx-auto">
 
-        {/* HEADER */}
-
-        <div className="flex justify-between items-center">
+        <header className="flex items-center justify-between">
 
           <div className="text-[#C8FF3D] text-sm tracking-[0.5em]">
             MOMENTO LIVE
           </div>
 
-          <div className="text-zinc-600 text-sm tracking-widest">
+          <div className="text-zinc-600 text-sm tracking-[0.25em]">
             {eventCode}
           </div>
 
-        </div>
+        </header>
 
-        {/* QUESTION */}
+        <section className="text-center mt-16 md:mt-20">
 
-        <div className="text-center mt-20">
-
-          <p className="text-[#C8FF3D] text-lg tracking-[0.4em]">
+          <p className="text-[#C8FF3D] text-base md:text-lg tracking-[0.45em]">
             ВОПРОС
           </p>
 
-          <h1 className="text-5xl md:text-7xl font-black leading-tight mt-8 max-w-6xl mx-auto">
+          <h1 className="text-5xl md:text-7xl xl:text-8xl font-black leading-[1.05] mt-7 max-w-6xl mx-auto">
             {question.question}
           </h1>
 
-        </div>
+        </section>
 
-        {/* ANSWERS */}
-
-        <div className="grid md:grid-cols-2 gap-6 max-w-6xl mx-auto mt-20">
+        <section className="grid md:grid-cols-2 gap-5 md:gap-7 max-w-6xl mx-auto mt-16 md:mt-20">
 
           {answers.map(
             (answer, index) => (
 
               <div
                 key={answer.id}
-                className="rounded-3xl border border-white/10 bg-white/[0.04] px-8 py-7 flex items-center gap-6"
+                className="rounded-3xl border border-white/10 bg-white/[0.04] px-7 py-6 md:px-8 md:py-7 flex items-center gap-6"
               >
 
-                <div className="w-16 h-16 rounded-2xl bg-white/[0.06] flex items-center justify-center text-2xl font-black text-[#C8FF3D]">
+                <div className="w-14 h-14 md:w-16 md:h-16 shrink-0 rounded-2xl bg-white/[0.06] flex items-center justify-center text-xl md:text-2xl font-black text-[#C8FF3D]">
 
                   {String.fromCharCode(
                     65 + index
@@ -397,7 +446,7 @@ function ScreenContent() {
 
                 </div>
 
-                <div className="text-2xl md:text-3xl font-bold">
+                <div className="text-xl md:text-2xl xl:text-3xl font-bold">
                   {answer.text}
                 </div>
 
@@ -406,13 +455,11 @@ function ScreenContent() {
             )
           )}
 
-        </div>
+        </section>
 
-        {/* FOOTER */}
-
-        <div className="text-center mt-20 text-zinc-700 text-xs tracking-[0.4em]">
+        <footer className="text-center mt-16 text-zinc-800 text-xs tracking-[0.4em]">
           YOUR EVENT. YOUR MOMENTS.
-        </div>
+        </footer>
 
       </div>
 
@@ -420,18 +467,16 @@ function ScreenContent() {
   );
 }
 
-// =====================================================
-// PAGE
-// =====================================================
-
 export default function ScreenPage() {
   return (
     <Suspense
       fallback={
         <main className="min-h-screen bg-[#101014] text-white flex items-center justify-center">
-          <div className="text-3xl font-black">
+
+          <div className="text-3xl font-black tracking-[0.2em]">
             MOMENTO LIVE
           </div>
+
         </main>
       }
     >
